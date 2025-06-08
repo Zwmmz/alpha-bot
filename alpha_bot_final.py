@@ -17,10 +17,27 @@ wallets = {
     "哥哥": "0x7a1a9669061ed85af6366945e2d5bd6271b81098"
 }
 
+# 新增要查詢的兩個代幣
+TOKENS = {
+    "幣種A": "0xe6df05ce8c8301223373cf5b969afcb1498c5528",
+    "幣種B": "0xc71b5f631354be6853efe9c3ab6b9590f8302e81"
+}
+
 def get_bnb_price():
     url = "https://api.coingecko.com/api/v3/simple/price?ids=binancecoin&vs_currencies=usd"
     response = requests.get(url)
     return response.json().get("binancecoin", {}).get("usd", 300)
+
+def get_token_price(contract_address):
+    url = f"https://api.coingecko.com/api/v3/simple/token_price/binance-smart-chain?contract_addresses={contract_address}&vs_currencies=usd"
+    response = requests.get(url)
+    result = response.json()
+    return list(result.values())[0]["usd"] if result else 0
+
+def get_token_balance(address, contract_address):
+    url = f"https://api.bscscan.com/api?module=account&action=tokenbalance&contractaddress={contract_address}&address={address}&apikey={API_KEY}"
+    response = requests.get(url)
+    return int(response.json().get("result", 0)) / 1e18
 
 def get_wallet_balance(address):
     url = f"https://api.bscscan.com/api?module=account&action=balance&address={address}&apikey={API_KEY}"
@@ -74,22 +91,42 @@ def update_data():
     print(f"\n==== 更新中 (台灣時間): {current_time} ====")
 
     bnb_price = get_bnb_price()
+    tokenA_price = get_token_price(TOKENS["幣種A"])
+    tokenB_price = get_token_price(TOKENS["幣種B"])
+
     message = f"✅ 報告時間: {current_time} (台灣時間)\nBNB 即時價格: ${bnb_price}\n\n"
 
     for nickname, address in wallets.items():
+        # BNB
         balance_bnb = get_wallet_balance(address)
-        balance_usd = balance_bnb * bnb_price
-        balance_points = calculate_balance_points(balance_usd)
+        balance_usd_bnb = balance_bnb * bnb_price
 
+        # 幣種 A
+        balance_tokenA = get_token_balance(address, TOKENS["幣種A"])
+        balance_usd_tokenA = balance_tokenA * tokenA_price
+
+        # 幣種 B
+        balance_tokenB = get_token_balance(address, TOKENS["幣種B"])
+        balance_usd_tokenB = balance_tokenB * tokenB_price
+
+        # 總資產估值
+        total_balance_usd = balance_usd_bnb + balance_usd_tokenA + balance_usd_tokenB
+        balance_points = calculate_balance_points(total_balance_usd)
+
+        # 當日交易
         received_bnb = get_today_received_bnb_internal(address)
         trade_usd = received_bnb * bnb_price
         trade_double = trade_usd * 2
         volume_points = calculate_volume_points(trade_double)
+
         total_points = balance_points + volume_points
 
         message += (
             f"🔹 {nickname} ({address})\n"
-            f"   資產估值: ${balance_usd:,.2f}\n"
+            f"   BNB: {balance_bnb:.4f} ≈ ${balance_usd_bnb:,.2f}\n"
+            f"   幣種A: {balance_tokenA:.4f} ≈ ${balance_usd_tokenA:,.2f}\n"
+            f"   幣種B: {balance_tokenB:.4f} ≈ ${balance_usd_tokenB:,.2f}\n"
+            f"   ➜ 總資產估值: ${total_balance_usd:,.2f}\n"
             f"   資產積分: {balance_points}\n"
             f"   ➜ 交易量: {received_bnb:.4f} BNB (≈ ${trade_usd:,.2f}) (×2=${trade_double:,.2f})\n"
             f"   交易積分: {volume_points}\n"
