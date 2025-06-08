@@ -44,8 +44,17 @@ def get_token_balance(address, contract_address):
     return int(response.json().get("result", 0)) / 1e18
 
 def get_today_sent_token(address, token_address):
-    # 排除 BNB Swap Pool 合約地址（例如 WBNB）
-    bnb_swap_pools = ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"]
+    # 常見的 BSC DEX Router（排除換成 BNB 的轉出量）
+    router_addresses = [
+        "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+        "0xc0788a3aad43d79aa53b09c2eacc313a787d1d607",
+        "0xcde540d7eafe93ac5fe6233bee57e1270d3e330f",
+        "0x858e3312ed3a876947ea49d572a7c42de08af7ee",
+        "0x3aee82bba2080a78516d18670207b3f5f87c2aef",
+        "0x325e343f1ef2c3e6ac1534e535842ba05e852046",
+        "0x3a3d709cae8497c3a2e74d7fad1d0f03304ab41d"
+    ]
+
     url = f"https://api.bscscan.com/api?module=account&action=tokentx&contractaddress={token_address}&address={address}&startblock=0&endblock=99999999&sort=desc&apikey={API_KEY}"
     response = requests.get(url)
     txs = response.json().get("result", [])
@@ -56,7 +65,7 @@ def get_today_sent_token(address, token_address):
         if int(tx["timeStamp"]) < today_start:
             break
         if tx["from"].lower() == address.lower():
-            if tx["to"].lower() in bnb_swap_pools:
+            if tx["to"].lower() in router_addresses:
                 continue
             total += int(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
     return total
