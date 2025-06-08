@@ -18,8 +18,8 @@ wallets = {
 }
 
 TOKENS = {
-    "幣種A": "0xe6df05ce8c8301223373cf5b969afcb1498c5528",
-    "幣種B": "0xc71b5f631354be6853efe9c3ab6b9590f8302e81"
+    "KEGO": "0xe6df05ce8c8301223373cf5b969afcb1498c5528",
+    "ZKJ": "0xc71b5f631354be6853efe9c3ab6b9590f8302e81"
 }
 
 def get_bnb_price():
@@ -44,6 +44,8 @@ def get_token_balance(address, contract_address):
     return int(response.json().get("result", 0)) / 1e18
 
 def get_today_sent_token(address, token_address):
+    # 排除 BNB Swap Pool 合約地址（例如 WBNB）
+    bnb_swap_pools = ["0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"]
     url = f"https://api.bscscan.com/api?module=account&action=tokentx&contractaddress={token_address}&address={address}&startblock=0&endblock=99999999&sort=desc&apikey={API_KEY}"
     response = requests.get(url)
     txs = response.json().get("result", [])
@@ -54,6 +56,8 @@ def get_today_sent_token(address, token_address):
         if int(tx["timeStamp"]) < today_start:
             break
         if tx["from"].lower() == address.lower():
+            if tx["to"].lower() in bnb_swap_pools:
+                continue
             total += int(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
     return total
 
@@ -104,8 +108,8 @@ def update_data():
     print(f"\n==== 更新中 (台灣時間): {current_time} ====")
 
     bnb_price = get_bnb_price()
-    tokenA_price = get_token_price(TOKENS["幣種A"])
-    tokenB_price = get_token_price(TOKENS["幣種B"])
+    kego_price = get_token_price(TOKENS["KEGO"])
+    zkj_price = get_token_price(TOKENS["ZKJ"])
 
     message = f"✅ 報告時間: {current_time} (台灣時間)\nBNB 即時價格: ${bnb_price}\n\n"
 
@@ -113,24 +117,24 @@ def update_data():
         balance_bnb = get_wallet_balance(address)
         balance_usd_bnb = balance_bnb * bnb_price
 
-        balance_tokenA = get_token_balance(address, TOKENS["幣種A"])
-        balance_usd_tokenA = balance_tokenA * tokenA_price
+        balance_kego = get_token_balance(address, TOKENS["KEGO"])
+        balance_usd_kego = balance_kego * kego_price
 
-        balance_tokenB = get_token_balance(address, TOKENS["幣種B"])
-        balance_usd_tokenB = balance_tokenB * tokenB_price
+        balance_zkj = get_token_balance(address, TOKENS["ZKJ"])
+        balance_usd_zkj = balance_zkj * zkj_price
 
-        total_balance_usd = balance_usd_bnb + balance_usd_tokenA + balance_usd_tokenB
+        total_balance_usd = balance_usd_bnb + balance_usd_kego + balance_usd_zkj
         balance_points = calculate_balance_points(total_balance_usd)
 
         received_bnb = get_today_received_bnb_internal(address)
         trade_usd = received_bnb * bnb_price
 
-        sent_tokenA = get_today_sent_token(address, TOKENS["幣種A"])
-        sent_tokenB = get_today_sent_token(address, TOKENS["幣種B"])
-        sentA_usd = sent_tokenA * tokenA_price
-        sentB_usd = sent_tokenB * tokenB_price
+        sent_kego = get_today_sent_token(address, TOKENS["KEGO"])
+        sent_zkj = get_today_sent_token(address, TOKENS["ZKJ"])
+        sent_kego_usd = sent_kego * kego_price
+        sent_zkj_usd = sent_zkj * zkj_price
 
-        total_trade_usd = trade_usd + sentA_usd + sentB_usd
+        total_trade_usd = trade_usd + sent_kego_usd + sent_zkj_usd
         trade_double = total_trade_usd * 2
         volume_points = calculate_volume_points(trade_double)
         total_points = balance_points + volume_points
@@ -138,12 +142,12 @@ def update_data():
         message += (
             f"🔹 {nickname} ({address})\n"
             f"   ➜ BNB: {balance_bnb:.4f} ≈ ${balance_usd_bnb:,.2f}\n"
-            f"   ➜ 幣種A: {balance_tokenA:.4f} ≈ ${balance_usd_tokenA:,.2f}\n"
-            f"   ➜ 幣種B: {balance_tokenB:.4f} ≈ ${balance_usd_tokenB:,.2f}\n"
+            f"   ➜ KEGO: {balance_kego:.4f} ≈ ${balance_usd_kego:,.2f}\n"
+            f"   ➜ ZKJ: {balance_zkj:.4f} ≈ ${balance_usd_zkj:,.2f}\n"
             f"   ➜ 總資產估值: ${total_balance_usd:,.2f}\n"
             f"   ➜ 交易量 BNB: {received_bnb:.4f} (≈ ${trade_usd:,.2f})\n"
-            f"   ➜ 交易量 幣種A: {sent_tokenA:.4f} (≈ ${sentA_usd:,.2f})\n"
-            f"   ➜ 交易量 幣種B: {sent_tokenB:.4f} (≈ ${sentB_usd:,.2f})\n"
+            f"   ➜ 交易量 KEGO: {sent_kego:.4f} (≈ ${sent_kego_usd:,.2f})\n"
+            f"   ➜ 交易量 ZKJ: {sent_zkj:.4f} (≈ ${sent_zkj_usd:,.2f})\n"
             f"   ➜ 總交易量(USD)×2: ${trade_double:,.2f}\n"
             f"   ➜ 資產積分: {balance_points}\n"
             f"   ➜ 交易積分: {volume_points}\n"
@@ -153,9 +157,9 @@ def update_data():
     print(message)
     send_telegram_message(message.strip())
 
-# 每兩小時報告
+# 每 2 小時報告
 schedule.every(2).hours.do(update_data)
-update_data()  # 啟動時先執行一次
+update_data()  # 啟動時執行一次
 
 while True:
     schedule.run_pending()
