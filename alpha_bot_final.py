@@ -17,7 +17,6 @@ wallets = {
     "哥哥": "0x7a1a9669061ed85af6366945e2d5bd6271b81098"
 }
 
-# 新增要查詢的兩個代幣
 TOKENS = {
     "幣種A": "0xe6df05ce8c8301223373cf5b969afcb1498c5528",
     "幣種B": "0xc71b5f631354be6853efe9c3ab6b9590f8302e81"
@@ -34,15 +33,43 @@ def get_token_price(contract_address):
     result = response.json()
     return list(result.values())[0]["usd"] if result else 0
 
+def get_wallet_balance(address):
+    url = f"https://api.bscscan.com/api?module=account&action=balance&address={address}&apikey={API_KEY}"
+    response = requests.get(url)
+    return int(response.json().get("result", 0)) / 1e18
+
 def get_token_balance(address, contract_address):
     url = f"https://api.bscscan.com/api?module=account&action=tokenbalance&contractaddress={contract_address}&address={address}&apikey={API_KEY}"
     response = requests.get(url)
     return int(response.json().get("result", 0)) / 1e18
 
-def get_wallet_balance(address):
-    url = f"https://api.bscscan.com/api?module=account&action=balance&address={address}&apikey={API_KEY}"
+def get_today_sent_token(address, token_address):
+    url = f"https://api.bscscan.com/api?module=account&action=tokentx&contractaddress={token_address}&address={address}&startblock=0&endblock=99999999&sort=desc&apikey={API_KEY}"
     response = requests.get(url)
-    return int(response.json().get("result", 0)) / 1e18
+    txs = response.json().get("result", [])
+    taiwan_tz = pytz.timezone("Asia/Taipei")
+    today_start = int(datetime.now(taiwan_tz).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(pytz.utc).timestamp())
+    total = 0.0
+    for tx in txs:
+        if int(tx["timeStamp"]) < today_start:
+            break
+        if tx["from"].lower() == address.lower():
+            total += int(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
+    return total
+
+def get_today_received_bnb_internal(address):
+    url = f"https://api.bscscan.com/api?module=account&action=txlistinternal&address={address}&startblock=0&endblock=99999999&sort=desc&apikey={API_KEY}"
+    response = requests.get(url)
+    txs = response.json().get("result", [])
+    taiwan_tz = pytz.timezone("Asia/Taipei")
+    today_start = int(datetime.now(taiwan_tz).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(pytz.utc).timestamp())
+    total_bnb = 0.0
+    for tx in txs:
+        if int(tx["timeStamp"]) < today_start:
+            break
+        if tx["to"].lower() == address.lower():
+            total_bnb += int(tx["value"]) / 1e18
+    return total_bnb
 
 def calculate_balance_points(balance_usd):
     if balance_usd >= 100000:
@@ -66,20 +93,6 @@ def calculate_volume_points(purchase_usd):
         threshold *= 2
     return points
 
-def get_today_received_bnb_internal(address):
-    url = f"https://api.bscscan.com/api?module=account&action=txlistinternal&address={address}&startblock=0&endblock=99999999&sort=desc&apikey={API_KEY}"
-    response = requests.get(url)
-    txs = response.json().get("result", [])
-    taiwan_tz = pytz.timezone("Asia/Taipei")
-    today_start = int(datetime.now(taiwan_tz).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(pytz.utc).timestamp())
-    total_bnb = 0.0
-    for tx in txs:
-        if int(tx["timeStamp"]) < today_start:
-            break
-        if tx["to"].lower() == address.lower():
-            total_bnb += int(tx["value"]) / 1e18
-    return total_bnb
-
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
@@ -97,53 +110,52 @@ def update_data():
     message = f"✅ 報告時間: {current_time} (台灣時間)\nBNB 即時價格: ${bnb_price}\n\n"
 
     for nickname, address in wallets.items():
-        # BNB
         balance_bnb = get_wallet_balance(address)
         balance_usd_bnb = balance_bnb * bnb_price
 
-        # 幣種 A
         balance_tokenA = get_token_balance(address, TOKENS["幣種A"])
         balance_usd_tokenA = balance_tokenA * tokenA_price
 
-        # 幣種 B
         balance_tokenB = get_token_balance(address, TOKENS["幣種B"])
         balance_usd_tokenB = balance_tokenB * tokenB_price
 
-        # 總資產估值
         total_balance_usd = balance_usd_bnb + balance_usd_tokenA + balance_usd_tokenB
         balance_points = calculate_balance_points(total_balance_usd)
 
-        # 當日交易
         received_bnb = get_today_received_bnb_internal(address)
         trade_usd = received_bnb * bnb_price
-        trade_double = trade_usd * 2
-        volume_points = calculate_volume_points(trade_double)
 
+        sent_tokenA = get_today_sent_token(address, TOKENS["幣種A"])
+        sent_tokenB = get_today_sent_token(address, TOKENS["幣種B"])
+        sentA_usd = sent_tokenA * tokenA_price
+        sentB_usd = sent_tokenB * tokenB_price
+
+        total_trade_usd = trade_usd + sentA_usd + sentB_usd
+        trade_double = total_trade_usd * 2
+        volume_points = calculate_volume_points(trade_double)
         total_points = balance_points + volume_points
 
         message += (
             f"🔹 {nickname} ({address})\n"
-            f"   BNB: {balance_bnb:.4f} ≈ ${balance_usd_bnb:,.2f}\n"
-            f"   幣種A: {balance_tokenA:.4f} ≈ ${balance_usd_tokenA:,.2f}\n"
-            f"   幣種B: {balance_tokenB:.4f} ≈ ${balance_usd_tokenB:,.2f}\n"
+            f"   ➜ BNB: {balance_bnb:.4f} ≈ ${balance_usd_bnb:,.2f}\n"
+            f"   ➜ 幣種A: {balance_tokenA:.4f} ≈ ${balance_usd_tokenA:,.2f}\n"
+            f"   ➜ 幣種B: {balance_tokenB:.4f} ≈ ${balance_usd_tokenB:,.2f}\n"
             f"   ➜ 總資產估值: ${total_balance_usd:,.2f}\n"
-            f"   資產積分: {balance_points}\n"
-            f"   ➜ 交易量: {received_bnb:.4f} BNB (≈ ${trade_usd:,.2f}) (×2=${trade_double:,.2f})\n"
-            f"   交易積分: {volume_points}\n"
+            f"   ➜ 交易量 BNB: {received_bnb:.4f} (≈ ${trade_usd:,.2f})\n"
+            f"   ➜ 交易量 幣種A: {sent_tokenA:.4f} (≈ ${sentA_usd:,.2f})\n"
+            f"   ➜ 交易量 幣種B: {sent_tokenB:.4f} (≈ ${sentB_usd:,.2f})\n"
+            f"   ➜ 總交易量(USD)×2: ${trade_double:,.2f}\n"
+            f"   ➜ 資產積分: {balance_points}\n"
+            f"   ➜ 交易積分: {volume_points}\n"
             f"   ➜ 總積分: {total_points}\n\n"
         )
 
     print(message)
     send_telegram_message(message.strip())
 
-# 定時排程 (台灣時間)
-schedule.every().day.at("10:00").do(update_data)
-schedule.every().day.at("13:00").do(update_data)
-schedule.every().day.at("16:00").do(update_data)
-schedule.every().day.at("20:00").do(update_data)
-schedule.every().day.at("23:00").do(update_data)
-
-update_data()  # 啟動時立刻執行一次
+# 每兩小時報告
+schedule.every(2).hours.do(update_data)
+update_data()  # 啟動時先執行一次
 
 while True:
     schedule.run_pending()
