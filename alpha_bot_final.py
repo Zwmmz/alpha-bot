@@ -44,7 +44,6 @@ def get_token_balance(address, contract_address):
     return int(response.json().get("result", 0)) / 1e18
 
 def get_today_sent_token(address, token_address):
-    # 常見的 BSC DEX Router（排除換成 BNB 的轉出量）
     router_addresses = [
         "0x10ed43c718714eb63d5aa57b78b54704e256024e",
         "0xc0788a3aad43d79aa53b09c2eacc313a787d1d607",
@@ -57,7 +56,14 @@ def get_today_sent_token(address, token_address):
 
     url = f"https://api.bscscan.com/api?module=account&action=tokentx&contractaddress={token_address}&address={address}&startblock=0&endblock=99999999&sort=desc&apikey={API_KEY}"
     response = requests.get(url)
-    txs = response.json().get("result", [])
+    try:
+        txs = response.json().get("result", [])
+        if txs is None:
+            txs = []
+    except Exception as e:
+        print("解析 API 回傳失敗：", e)
+        txs = []
+
     taiwan_tz = pytz.timezone("Asia/Taipei")
     today_start = int(datetime.now(taiwan_tz).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(pytz.utc).timestamp())
     total = 0.0
@@ -73,7 +79,14 @@ def get_today_sent_token(address, token_address):
 def get_today_received_bnb_internal(address):
     url = f"https://api.bscscan.com/api?module=account&action=txlistinternal&address={address}&startblock=0&endblock=99999999&sort=desc&apikey={API_KEY}"
     response = requests.get(url)
-    txs = response.json().get("result", [])
+    try:
+        txs = response.json().get("result", [])
+        if txs is None:
+            txs = []
+    except Exception as e:
+        print("解析 API 回傳失敗：", e)
+        txs = []
+
     taiwan_tz = pytz.timezone("Asia/Taipei")
     today_start = int(datetime.now(taiwan_tz).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(pytz.utc).timestamp())
     total_bnb = 0.0
